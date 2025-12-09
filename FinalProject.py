@@ -7,15 +7,23 @@ import os
 import random
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
+import datetime
+import re # Added for bin formatting
+#sns.reset_orig()
+#plt.style.use('default')
+#plt.ioff()
+
 
 # --- 1. Global Model Parameters and Constants ---
-# *** OPTIMIZED FEATURE MAP (8 RELEVANT FACTORS) ***
+# *** OPTIMIZED FEATURE MAP (7 RELEVANT FACTORS) ***
 FEATURE_MAP = {
     'Numerical': [
         'study_hours', 'class_attendance', 'sleep_hours' 
     ],
     'Categorical': [
-        'course', 'exam_difficulty', 'study_method', 'sleep_quality', 'gender'
+        # Removed 'course' category
+        'exam_difficulty', 'study_method', 'sleep_quality', 'gender'
     ]
 }
 TARGET_COL = 'exam_score'
@@ -45,13 +53,15 @@ def remove_outliers(df, columns, z_thresh=3):
             df_filtered = df_filtered[np.abs(z_scores) < z_thresh]
     return df_filtered
 
-@st.cache_data
+#st.cache_data
 def load_data(file_path):
     """Loads and preprocesses the Exam_Score_Prediction.csv dataset."""
     try:
+        # NOTE: load_data now filters based on the updated FEATURE_MAP
         df = pd.read_csv(file_path)
         
         selected_cols = FEATURE_MAP['Numerical'] + FEATURE_MAP['Categorical'] + [TARGET_COL]
+        # Filter selected columns that actually exist in the CSV (removes 'course' gracefully if still present)
         valid_selected_cols = [col for col in selected_cols if col in df.columns]
         df = df[valid_selected_cols].copy()
         
@@ -78,8 +88,8 @@ def load_data(file_path):
         st.stop()
         return pd.DataFrame()
 
-
-@st.cache_resource
+# Removed print_file_version() function as requested.
+#@st.cache_resource
 def setup_model_and_features():
     """Trains the model and prepares global feature variables using Streamlit caching."""
     global model, feature_cols, GLOBAL_CATEGORIES, GLOBAL_SCORE_BIAS
@@ -175,7 +185,7 @@ def predict_score(input_values: dict, model_data) -> float:
 def generate_recommendations(current_inputs: dict, goal_score: float, model_data):
     """
     Analyzes which inputs need adjustment to reach the goal score.
-    Focuses on controllable numerical factors.
+    Focuss on controllable numerical factors.
     """
     if goal_score <= 0 or goal_score > 100:
         return ["Please set a valid goal score between 1 and 100."]
@@ -188,6 +198,10 @@ def generate_recommendations(current_inputs: dict, goal_score: float, model_data
     current_inputs_df['study_hours'] = current_inputs_df['study_hours'].clip(upper=MAX_STUDY_HOURS_BASIC_EXAM_CAP)
     
     input_encoded = pd.get_dummies(current_inputs_df, columns=FEATURE_MAP['Categorical'], prefix=FEATURE_MAP['Categorical'], dummy_na=False)
+
+    # NOTE: Since 'course' is removed, we must ensure it's not present in current_inputs
+    # The calling logic (main()) no longer passes 'course', so this is safe.
+
     final_input = pd.DataFrame(0, index=[0], columns=feature_cols, dtype=float)
     for col in input_encoded.columns:
         if col in final_input.columns:
@@ -289,6 +303,7 @@ def generate_recommendations(current_inputs: dict, goal_score: float, model_data
     
     low_impact_factors = []
     
+    # Removed specific recommendation related to 'course' or 'study_method' for online videos
     if current_inputs['exam_difficulty'] == 'hard':
         low_impact_factors.append("Try shifting focus to easier courses first or reviewing foundational material (Difficulty: Hard).")
     if current_inputs['study_method'] == 'online videos':
@@ -301,28 +316,22 @@ def generate_recommendations(current_inputs: dict, goal_score: float, model_data
         
     return recommendations
 
-# --- 4. Visualization Functions ---
 
-def plot_relationship(df, feature, target):
-    """Generates a plot showing the relationship between a single feature and the target score."""
-    plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(6, 4))
+def format_bin_label(label):
+    """Formats a bin interval string to show only one decimal point."""
+    # Find all numbers in the string (e.g., "[0.0, 1.428...)" -> ["0.0", "1.428..."]
     
-    if feature in FEATURE_MAP['Numerical']:
-        # Scatter plot for numerical features with regression line
-        sns.regplot(x=feature, y=target, data=df, ax=ax, scatter_kws={'alpha':0.6}, line_kws={'color': '#4A90E2'})
-        ax.set_title(f'Score vs. {feature.replace("_", " ").title()}', fontsize=12)
+    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", label)
     
-    elif feature in FEATURE_MAP['Categorical']:
-        # Box plot for categorical features
-        sns.boxplot(x=feature, y=target, data=df, ax=ax, palette="Pastel1")
-        ax.set_title(f'Score Distribution by {feature.replace("_", " ").title()}', fontsize=12)
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-    
-    ax.set_xlabel(feature.replace("_", " ").title(), fontsize=10)
-    ax.set_ylabel("Exam Score", fontsize=10)
-    plt.tight_layout()
-    return fig
+    if len(numbers) >= 2:
+        # Format the first and second number to 1 decimal place
+        start = float(numbers[0])
+        end = float(numbers[1])
+        # Reconstruct the string, assuming the format is [start, end)
+        return f"[{start:.1f}, {end:.1f})"
+    return label # Return original if parsing fails
+
+# --- 4. Visualization Functions ---
 
 def generate_random_input(feature_map, global_categories):
     """Generates a dictionary of random input values for simulation."""
@@ -344,58 +353,122 @@ def generate_random_input(feature_map, global_categories):
         
     return random_input
 
-def plot_predicted_distribution(model_data):
-    """Simulates predictions and plots the resulting score distribution."""
-    st.markdown("---")
-    st.header("3. Predicted Score Distribution")
-    st.markdown(f"This histogram shows the approximate **bell curve** the model generates based on random, realistic student inputs. (Mean should be near {DESIRED_MEAN:.2f}).")
+def plot_relationship(df, feature, target):
+    """Generates a plot showing the relationship between a single feature and the target score.
+    For numerical features, it plots the average score per bin (a histogram of means) 
+    with a linear trendline.
+    """
+    plt.style.use('default') 
+    fig, ax = plt.subplots(figsize=(6, 4))
     
-    # Unpack model data
-    model, feature_cols, global_categories, _ = model_data
+    # --- Y-Axis Setup (Set to 100 max for all plots) ---
+    y_max = 100
+    y_ticks = np.arange(30, 101, 10) 
+    
+    if feature in FEATURE_MAP['Numerical']:
+        # Bar Plotting Logic
+        df_temp = df[[feature, target]].copy() 
+        df_temp['bin'] = pd.cut(df_temp[feature], bins=7, include_lowest=True)
+        binned_means = df_temp.groupby('bin')[target].mean().reset_index()
+        binned_means['bin_label'] = binned_means['bin'].astype(str).apply(format_bin_label)
 
-    # 1. Simulate 20,000 predictions
-    num_samples = 2000
-    predicted_scores = []
-    
-    for _ in range(num_samples):
-        input_data = generate_random_input(FEATURE_MAP, global_categories)
-        score = predict_score(input_data, model_data)
-        if score != -1.0:
-            predicted_scores.append(score)
+        ax.bar(binned_means['bin_label'], binned_means[target], 
+               color='#2E86C1', alpha=0.9, 
+               edgecolor='#1A5276', linewidth=1.2)
+        
+        # Add Trendline
+        X_trend = np.arange(len(binned_means))
+        y_trend = binned_means[target].values
+        slope, intercept = np.polyfit(X_trend, y_trend, 1)
+        y_reg = slope * X_trend + intercept
+        ax.plot(X_trend, y_reg, color='#E74C3C', linestyle='--', linewidth=2.5) 
+        
+        ax.set_title(f'{feature.replace("_", " ").title()} vs. Average Exam Score', fontsize=12)
+        ax.set_xlabel(feature.replace("_", " ").title() + ' Bins', fontsize=10)
+        ax.set_ylabel("Average Exam Score", fontsize=10)
+        ax.set_xticklabels(binned_means['bin_label'], rotation=45, ha='right')
+        
+        ax.set_yticks(y_ticks)
+        ax.set_ylim(30, y_max) 
 
-    if not predicted_scores:
-        st.warning("Simulation failed to produce scores.")
-        return
+    
+    elif feature in FEATURE_MAP['Categorical']:
+        # Box Plotting Logic (Y-max is set to 100 for categorical features)
+        categories = df[feature].unique()
+        data = [df[df[feature] == cat][target] for cat in categories]
+        
+        ax.boxplot(data, vert=True, patch_artist=True, labels=categories, 
+                   boxprops={'facecolor': '#B3C3F0', 'edgecolor': '#4A90E2'}, 
+                   medianprops={'color': '#E74C3C', 'linewidth': 2})
 
-    scores_array = np.array(predicted_scores)
+        ax.set_title(f'Score Distribution by {feature.replace("_", " ").title()}', fontsize=12)
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+        ax.set_xlabel(feature.replace("_", " ").title(), fontsize=10)
+        ax.set_ylabel("Exam Score", fontsize=10)
+        
+        ax.set_yticks(y_ticks) 
+        ax.set_ylim(30, y_max) 
 
-    # 2. Plot the histogram
-    fig, ax = plt.subplots(figsize=(10, 5))
     
-    # Histogram
-    ax.hist(scores_array, bins=30, density=True, color='#4A90E2', alpha=0.7, edgecolor='black', label="Predicted Scores")
+    plt.tight_layout()
+    return fig
+
+# --- New Function: Plot Simulated Score Distribution ---
+
+def plot_predicted_distribution(model_data, trials=2000):
+    """
+    Simulates exam scores based on random inputs and plots the resulting distribution.
+    """
+    _, feature_cols, global_categories, _ = model_data
+
+    simulated_scores = []
     
-    # Plot the mean line
-    mean_score = np.mean(scores_array)
-    std_dev = np.std(scores_array)
-    ax.axvline(mean_score, color='red', linestyle='dashed', linewidth=2, label=f'Achieved Mean: {mean_score:.2f}')
+    for _ in range(trials):
+        # Generate random input for prediction
+        random_input = generate_random_input(FEATURE_MAP, global_categories)
+        
+        # Predict score using the existing predict_score function
+        score = predict_score(random_input, model_data)
+        simulated_scores.append(score)
+
+    # INCREASED SIZE: Changed figsize from (5, 3) back to (6, 4) for better visibility
+    fig, ax = plt.subplots(figsize=(6, 4))
     
-    ax.set_title('Simulated Exam Score Distribution', fontsize=16)
-    ax.set_xlabel(f'Predicted Exam Score (Std Dev: {std_dev:.2f})', fontsize=12)
-    ax.set_ylabel('Density', fontsize=12)
-    ax.legend()
-    ax.grid(axis='y', alpha=0.5)
-    ax.set_xlim(40, 100)
+    # Plot histogram
+    ax.hist(simulated_scores, bins=20, edgecolor='black', color='#28B463', alpha=0.8)
     
-    st.pyplot(fig)
+    # Calculate mean and median
+    mean_score = np.mean(simulated_scores)
+    median_score = np.median(simulated_scores)
+    
+    # Add vertical lines for mean and median
+    ax.axvline(mean_score, color='#E74C3C', linestyle='dashed', linewidth=2, label=f'Mean: {mean_score:.1f}')
+    ax.axvline(median_score, color='#F39C12', linestyle='dotted', linewidth=2, label=f'Median: {median_score:.1f}')
+
+    ax.set_title(f'Simulated Predicted Score Distribution ({trials} Trials)', fontsize=12) 
+    ax.set_xlabel("Predicted Exam Score", fontsize=10)
+    ax.set_ylabel("Frequency", fontsize=10)
+    ax.set_xlim(60, 100) # X-axis start at 60
+    ax.legend(loc='upper left', fontsize=9) 
+    plt.tight_layout()
+    return fig
 
 # --- 3. Streamlit Application Layout ---
 
 def main():
     st.set_page_config(page_title="Exam Score Predictor", layout="wide")
     st.title("🎓 Realistic Exam Score Predictor")
-    st.markdown(f"Using **8 key factors** from `Exam_Score_Prediction.csv` to predict an approximate score centered at **{DESIRED_MEAN:.2f}** (with $\\pm$ {REALISTIC_SPREAD_SD} SD variance for realism).")
+    st.markdown(f"Using **7 key factors** from `Exam_Score_Prediction.csv` to predict an approximate score centered at **{DESIRED_MEAN:.2f}** (with $\\pm$ {REALISTIC_SPREAD_SD} SD variance for realism).")
     st.divider()
+    
+    # --- CRITICAL CACHE CLEARING STEP ---
+    # These calls are intentionally placed here to fix the persistent plotting issue.
+    try:
+        st.cache_data.clear()
+        st.cache_resource.clear()
+    except AttributeError:
+        pass 
+    # ------------------------------------
 
     # Load and cache model/features
     model_data = setup_model_and_features()
@@ -450,12 +523,8 @@ def main():
     with col2:
         st.subheader("Context & Method Factors")
 
-        # course
-        user_inputs['course'] = st.selectbox(
-            "Course Type",
-            options=global_categories.get('course', ['Loading...']),
-            index=global_categories.get('course', []).index('b.sc') if 'b.sc' in global_categories.get('course', []) else 0
-        )
+        # Removed 'course' selectbox:
+        # user_inputs['course'] = st.selectbox(...)
         
         # exam_difficulty
         user_inputs['exam_difficulty'] = st.selectbox(
@@ -500,6 +569,9 @@ def main():
     if st.button("Generate Prediction & Recommendations", type="primary", use_container_width=True):
         
         # Generate prediction
+        # Pass only required inputs (no 'course')
+        # We must ensure the input dict only contains keys from FEATURE_MAP
+        # Since we removed 'course' from the selectbox, it won't be in user_inputs unless explicitly added elsewhere, which it isn't.
         predicted_score = predict_score(user_inputs, model_data)
         
         # Generate recommendations based on deterministic score
@@ -532,22 +604,39 @@ def main():
                 else:
                     st.success(rec)
 
-
-    # --- 5. Visualization Section ---
+    # --- 5. Visualization Section (MOVED HERE) ---
     st.markdown("---")
     st.header("2. Feature Relationships in the Data")
     st.markdown("Analyze how each factor relates to the final Exam Score in the dataset.")
     
+    # --- Row 1: Feature Relationships ---
+    st.subheader("Factor Correlation (Binned Data)")
     all_features = FEATURE_MAP['Numerical'] + FEATURE_MAP['Categorical']
     
+    # NOTE: The loop size adapts automatically, now generating 3 numerical plots and 4 categorical plots.
     plot_cols = st.columns(3)
-    
+
     for i, feature in enumerate(all_features):
         with plot_cols[i % 3]:
+            # df_raw is now accessible here
             fig = plot_relationship(df_raw, feature, TARGET_COL)
-            st.pyplot(fig, use_container_width=True)
+            st.pyplot(fig, clear_figure=True)
+            plt.close(fig) 
 
-    plot_predicted_distribution(model_data)
-
+    st.markdown("---")
+    
+    # --- Row 2: Simulated Score Distribution ---
+    st.subheader("Simulated Prediction Distribution")
+    # Use st.container() and st.columns() to control the size of the graph area within the wide layout
+    plot_container = st.container()
+    
+    # Plot takes up half the width
+    col_plot, col_spacer = plot_container.columns([1.5, 1.5]) 
+    
+    with col_plot:
+        fig_dist = plot_predicted_distribution(model_data, trials=2000)
+        st.pyplot(fig_dist, clear_figure=True)
+        plt.close(fig_dist)
+            
 if __name__ == '__main__':
     main()
