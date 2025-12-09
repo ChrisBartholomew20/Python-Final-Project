@@ -6,13 +6,8 @@ import numpy as np
 import os
 import random
 import matplotlib.pyplot as plt
-import seaborn as sns
-import os
-import datetime
-import re # Added for bin formatting
-#sns.reset_orig()
-#plt.style.use('default')
-#plt.ioff()
+import re 
+
 
 
 # --- 1. Global Model Parameters and Constants ---
@@ -32,7 +27,6 @@ TARGET_COL = 'exam_score'
 # MODIFICATION: Setting the target mean to 75.0 for a realistic average exam score center.
 DESIRED_MEAN = 80.0 
 REALISTIC_SPREAD_SD = 1.0 # Final SD for noise, ensuring smooth bell curve (approx 1.5% variance)
-# High Score Scaling Factor (1.65) is maintained to ensure max inputs still hit 100
 HIGH_SCORE_SCALING_FACTOR = .8
 MAX_STUDY_HOURS_BASIC_EXAM_CAP = 10.0 # Input cap for study hours
 
@@ -53,7 +47,7 @@ def remove_outliers(df, columns, z_thresh=3):
             df_filtered = df_filtered[np.abs(z_scores) < z_thresh]
     return df_filtered
 
-#st.cache_data
+
 def load_data(file_path):
     """Loads and preprocesses the Exam_Score_Prediction.csv dataset."""
     try:
@@ -88,8 +82,7 @@ def load_data(file_path):
         st.stop()
         return pd.DataFrame()
 
-# Removed print_file_version() function as requested.
-#@st.cache_resource
+
 def setup_model_and_features():
     """Trains the model and prepares global feature variables using Streamlit caching."""
     global model, feature_cols, GLOBAL_CATEGORIES, GLOBAL_SCORE_BIAS
@@ -199,8 +192,7 @@ def generate_recommendations(current_inputs: dict, goal_score: float, model_data
     
     input_encoded = pd.get_dummies(current_inputs_df, columns=FEATURE_MAP['Categorical'], prefix=FEATURE_MAP['Categorical'], dummy_na=False)
 
-    # NOTE: Since 'course' is removed, we must ensure it's not present in current_inputs
-    # The calling logic (main()) no longer passes 'course', so this is safe.
+
 
     final_input = pd.DataFrame(0, index=[0], columns=feature_cols, dtype=float)
     for col in input_encoded.columns:
@@ -224,8 +216,7 @@ def generate_recommendations(current_inputs: dict, goal_score: float, model_data
     
     # 2. Analyze impact of controllable numerical factors (Hours, Attendance, Sleep)
     
-    # We will use simple perturbation analysis: change the input by a fixed amount 
-    # and see how much the score changes.
+
     
     # Store changes: {feature: score_boost}
     boosts = {}
@@ -298,12 +289,10 @@ def generate_recommendations(current_inputs: dict, goal_score: float, model_data
             
     # 4. Check for Categorical Improvement Possibilities
     
-    # We check if the current categorical factors are set to the best possible value
-    # Easiest way is to see if any high-impact categorical factors are set to a low value
+   
     
     low_impact_factors = []
     
-    # Removed specific recommendation related to 'course' or 'study_method' for online videos
     if current_inputs['exam_difficulty'] == 'hard':
         low_impact_factors.append("Try shifting focus to easier courses first or reviewing foundational material (Difficulty: Hard).")
     if current_inputs['study_method'] == 'online videos':
@@ -462,7 +451,6 @@ def main():
     st.divider()
     
     # --- CRITICAL CACHE CLEARING STEP ---
-    # These calls are intentionally placed here to fix the persistent plotting issue.
     try:
         st.cache_data.clear()
         st.cache_resource.clear()
@@ -523,8 +511,7 @@ def main():
     with col2:
         st.subheader("Context & Method Factors")
 
-        # Removed 'course' selectbox:
-        # user_inputs['course'] = st.selectbox(...)
+        
         
         # exam_difficulty
         user_inputs['exam_difficulty'] = st.selectbox(
@@ -569,9 +556,7 @@ def main():
     if st.button("Generate Prediction & Recommendations", type="primary", use_container_width=True):
         
         # Generate prediction
-        # Pass only required inputs (no 'course')
-        # We must ensure the input dict only contains keys from FEATURE_MAP
-        # Since we removed 'course' from the selectbox, it won't be in user_inputs unless explicitly added elsewhere, which it isn't.
+       
         predicted_score = predict_score(user_inputs, model_data)
         
         # Generate recommendations based on deterministic score
